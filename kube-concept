@@ -1,0 +1,10 @@
+# kubernetes important concept #
+
+## kubernetes objects ##
+
+* Object Spec and Status
+  every kubernetes object includes two nested object fields that govern the object's configuration
+  the spec, which you must provide, describes your desired state for the object–the characteristics that you want the object to have.
+  the status describes the actual state of the object, and is supplied and updated by the Kubernetes system.
+  
+  > API Conventions: https://github.com/kubernetes/community/blob/master/contributors/devel/api-conventions.md
