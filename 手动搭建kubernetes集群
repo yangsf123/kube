@@ -1,0 +1,32 @@
+# 手动搭建kubernetes集群
+
+  环境准备
+  - Mac os X
+  - VirtualBox
+  - Centos7.ISO
+  
+  1.设置VirtualBox全局网络
+  2.创建Centos7.vdi
+    install centos;
+    -> check box: I will configure partitioning;
+    -> check Done;
+    -> check Centos-root;
+    -> AcceptChange;
+    -> Begin Installation
+    -> set user/passwd
+  3.配置 VM 网络--双网卡nat,host-only
+    cd /etc/sysconfig/network-scripts
+    vim ifcfg-enp0s3/8
+  4.reboot
+    测试网络：ping 主机host/互联网
+    
+## 集群
+        IP             主机名              组件
+  192.168.56.111      Centos7       kube-apiserver、kube-controller-manager、kube-scheduler、etcd、kubelet、docker、flannel、dashboard
+  192.168.56.101      Centos7_101   kubelet、docker、flannel、traefik
+  192.168.56.102      Centos7_102   kubelet、docker、flannel
+  
+  tips:
+    容器IP范围：xxxx/xx
+    Kubernetes service IP范围：xxxx/xx
+    
