@@ -1,0 +1,40 @@
+# 搭建k8s集群
+
+环境准备
+ VirtualVM
+ Centos7
+ 
+ 宿主机IP：192.168.56.1
+ 
+ 三个节点
+ 192.168.56.10 master
+ 192.168.56.102 node1
+ 192.168.56.104 node2
+ 
+ etcd
+ 192.168.56.106
+ 
+ 
+ 配置网络
+ 双网卡：nat & host-only模式
+ vi /etc/sysconfig/network-scripts/ifcfg-enth03/8
+ 重启网络服务
+ > systemctl restart network
+ 
+ ## 配置集群
+ 1.修改所有VM的hosts文件
+ 192.168.56.10 master
+ 192.168.56.102 node1
+ 192.168.56.104 node2
+ 192.168.56.106 etcd
+ 
+ 2.关闭防火墙、swap和linux安全配置
+ > systemctl stop firewalld
+ > getenforce      
+ > setenforce 0
+ > swapoff -a
+ 
+ 3.安装docker配置国内镜像源
+ > yum -y install docker
+ 
+ 4.
