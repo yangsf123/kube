@@ -37,4 +37,97 @@
  3.安装docker配置国内镜像源
  > yum -y install docker
  
- 4.
+ 4.修改docker镜像源
+ cat  /etc/docker/daemon.json
+{
+ "registry-mirrors": ["http://68e02ab9.m.daocloud.io"]
+}
+
+启动docker
+systemctl enable docker
+systemctl start docker
+
+查看docker状态
+systemctl status docker
+
+4. 修改配置文件并重启docker服务
+echo 1 > /proc/sys/net/bridge/bridge-nf-call-iptables
+echo 1 > /proc/sys/net/bridge/bridge-nf-call-ip6tables
+systemctl  restart  docker
+
+5. 配置k8s安装包的yum仓库地址
+vi kubernetes.repo
+
+[kubernetes]
+name=Kubernetes
+baseurl=https://mirrors.aliyun.com/kubernetes/yum/repos/kubernetes-el7-x86_64
+enabled=1
+gpgcheck=0
+
+mv kubernetes.repo /etc/yum.repos.d/
+
+6. 安装k8s相关服务
+yum -y install kubectl kubelet kubeadm kubernetes-cni
+
+7. 启动kubelet服务
+sudo systemctl enable kubelet && sudo systemctl start kubelet
+
+此时kubelet服务状态可能是未启动状态，这里不需要处理
+
+8. 下载k8s集群服务依赖的docker镜像，并标签为google镜像
+docker pull warrior/pause-amd64:3.0
+docker tag warrior/pause-amd64:3.0 gcr.io/google_containers/pause-amd64:3.0
+
+docker pull warrior/etcd-amd64:3.0.17
+
+docker tag warrior/etcd-amd64:3.0.17  gcr.io/google_containers/etcd-amd64:3.0.17
+
+docker pull warrior/kube-apiserver-amd64:v1.6.0
+
+docker tag warrior/kube-apiserver-amd64:v1.6.0 gcr.io/google_containers/kube-apiserver-amd64:v1.6.0
+
+docker pull warrior/kube-scheduler-amd64:v1.6.0
+
+docker tag warrior/kube-scheduler-amd64:v1.6.0  gcr.io/google_containers/kube-scheduler-amd64:v1.6.0
+
+docker pull warrior/kube-controller-manager-amd64:v1.6.0
+
+docker tag warrior/kube-controller-manager-amd64:v1.6.0  gcr.io/google_containers/kube-controller-manager-amd64:v1.6.0
+
+docker pull warrior/kube-proxy-amd64:v1.6.0
+
+docker tag warrior/kube-proxy-amd64:v1.6.0  gcr.io/google_containers/kube-proxy-amd64:v1.6.0
+
+docker pull gysan/dnsmasq-metrics-amd64:1.0
+
+docker tag gysan/dnsmasq-metrics-amd64:1.0  gcr.io/google_containers/dnsmasq-metrics-amd64:1.0
+
+docker pull warrior/k8s-dns-kube-dns-amd64:1.14.1
+
+docker tag warrior/k8s-dns-kube-dns-amd64:1.14.1 gcr.io/google_containers/k8s-dns-kube-dns-amd64:1.14.4
+
+docker pull warrior/k8s-dns-dnsmasq-nanny-amd64:1.14.1
+
+docker tag warrior/k8s-dns-dnsmasq-nanny-amd64:1.14.1  gcr.io/google_containers/k8s-dns-dnsmasq-nanny-amd64:1.14.4
+
+docker pull warrior/k8s-dns-sidecar-amd64:1.14.1
+
+docker tag warrior/k8s-dns-sidecar-amd64:1.14.1  gcr.io/google_containers/k8s-dns-sidecar-amd64:1.14.4
+
+docker pull awa305/kube-discovery-amd64:1.0
+
+docker tag awa305/kube-discovery-amd64:1.0 gcr.io/google_containers/kube-discovery-amd64:1.0
+
+docker pull gysan/exechealthz-amd64:1.2
+
+docker tag gysan/exechealthz-amd64:1.2  gcr.io/google_containers/exechealthz-amd64:1.2
+
+docker pull registry.cn-hangzhou.aliyuncs.com/google-containers/kubernetes-dashboard-amd64:v1.6.0
+
+docker tag registry.cn-hangzhou.aliyuncs.com/google-containers/kubernetes-dashboard-amd64:v1.6.0 gcr.io/google_containers/kubernetes-dashboard-amd64:v1.6.0
+
+9. 下载Calico网络相关镜像（不安装calico网络无需下载）
+
+docker pull quay.io/calico/node:v2.6.5
+docker pull quay.io/calico/kube-controllers:v1.0.2
+docker pull quay.io/calico/cni:v1.11.2
