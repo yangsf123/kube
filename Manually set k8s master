@@ -201,4 +201,177 @@ hub.yun.paic.com.cn/k8s/kubernetes-dashboard-amd64:1.8.0
  创建目录/var/lib/etcd
  创建/lib/systemd/system/etcd.service,该文件内容如下
  > # 文件名: etcd.service
+ `
+ [Uint]
+ Description=Etcd Server
+ After=network.target
+ After=network-online.target
+ Wants=network-online.target
+ Documentation=https://github.com/coreos
+ [Service]
+ Type=notify
+ WorkingDirectory=/var/lib/etcd/
+ EnvironmentFile=/etc/etcd/etcd
+ ExecStart=/usr/local/bin/etcd $ETCD_OPTIONS
+ 
+ Restart=on-failure
+ RestartSec=5
+ LimitNOFILE=65536
+ [Install]
+ WantedBy=multi-user.target
+ `
+ 并执行
+ > systemctl deamon-reload
+ 需要对etcd集群中的所有节点都进行配置好，etcd服务之间可以使用相同的生死，配置好以后再依次启动etcd服务
+ > systemctl start etcd.service
+ 
+ (3)网络配置
+ 等etcd服务都启动，且正常以后，可以执行下列命令测试
+ > etcdctl --endpoints=${ETCD_ENDPOINTS} --ca-file=/etc/kubernetes/ssl/ca.pem --cert-file=/etc/etcd/ssl/etcd.pem --key-file=/etc/etcd/ssl/etcd-key.pem ls /
+ 
+ 执行命令配置kubernetes网络，其中${ETCD_ENDPOINTS}需要替换，用逗号隔开
+ > etcdctl --endpoints=${ETCD_ENDPOINTS} --ca-file=/etc/kubernetes/ssl/ca.pem --cert-file=/etc/etcd/ssl/etcd.pem --key-file=/etc/etcd/ssl/etcd-key.pem set /kubernetes/network/config "{\"Network\":\"172.1.0.0/16\", \"Subnetlen\":24, \"Backend\":{\"Type\":\"vxlan\"}}"
+该命令会在etcd中生成/kubernetes/network/config文件，后续k8s相关组件会使用这个配置文件
+** 至此etcd配置完成 **
+
+4.kube-apiserver部署
+ (1)准备环境变量文件
+  kube-common.template，内容如下：
+  > # kube-apiserver.template
+  # etcd集群服务地址列表
+  KUBE_ETCD_SERVERS="--etcd-servers=$ETCD_ENDPOINTS"
+  KUBE_LOGTOSTDERR="--logtostderr=true"
+  KUBE_LOG_LEVEL="--v=0"
+  KUBE_ALLOW_PRIV="--allow-privileged=false"
+  KUBE_MASTER="--master=http://$API_SERVER_ACCESS_IP:8080"
+  KUBE_API_SERVER="https://$API_SERVER_ACCESS_IP:6443"
+  # 服务望断（Service CIDR），部署前路由不可达，部署后集群内使用IP：Port可达
+  KUBE_SERVICE_ADDRESSES="--service-cluster-ip-range-172.254.0.0/16"
+  # kubernetes服务IP（预分配，一般是SERVICE_CIDR中第一个IP）
+  CLUSTER_KUBERNETES_SVC_IP="172.254.0.1"
+  # 集群DNS服务IP（从SERVICE_CIDR中预分配）
+  CLUSTER_DNS_SVC_IP="--cluster-dns=172.254.0.2"
+  # flanneld网络配置前缀
+  FLANNELD_ETCD_PREFIX="--etcd-prefix=/kubernetes/network"
+  > 替换其中的参数: $ETCD_ENDPOINTS,$API_SERVER_ACCESS，替换后重命名文件：/etc/kubernetes/kube-common
   
+  apiserver.template内容如下：
+  > # apiserver.template
+  > # The address on the local server to listen to.
+  KUBE_API_ADDRESS="--advertise-address=$API_SERVER_ACCESS_IP --bind-address=$API_SERVER_ACCESS_IP --insecure-bind-address=$API_SERVER_ACCESS_IP"
+  
+  > # The port on the local server to listen on.
+  KUBE_API_PORT="--insecure-port=8080"
+  
+  KUBE_ADMISSION_CONTROL="--admission-controll=NamespaceLifecycle,NamespaceExists,LimitRanger,SecurityContextDeny,ResourceQuota,ServiceAccount,NodeRestriction"
+  
+  # Add your own!
+  KUBE_API_ARGS="--authorization-mode=RBAC,Node \
+  --runtime-config=rbac.authorization.k8s.io/v1beta1 \
+  --kubelet-https=true \
+  --enable-bootstrap-token-auth \
+  --token-auth-file=/etc/kubernetes/token.csv \
+  --service-node-port-range=30000-32767 \
+  --tls-ca-file=etc/kubernetes/ssl/ca.pem \
+  --tls-cert-file=/etc/kubernetes/ssl/kubernetes.pem \
+  --tls-private-key-file=/etc/kubernetes/ssl/kubernetes-key.pem \
+  --client-ca-file=/etc/kubernetes/ssl/ca.pem \
+  --service-account-key-file=/etc/kubernetes/ssl/ca-key.pem \
+  --etcd-cafile=/etc/kubernetes/ssl/ca.pem \
+  --etcd-certfile=/etc/etcd/ssl/etcd.pem \
+  --etcd-keyfile=/etc/etcd/ssl/etcd-key.pem \
+  --enable-swagger-ui=true \
+  --audit-log-maxage=30 \
+  --audit-log-maxbackup=3 \
+  --audit-log-maxsize=100 \
+  --audit-log-path=/var/lib/audit.log \
+  --event-ttl=5h \
+  --v=2"
+  > 替换变量 $API_SERVER_ACCESS_IP，替换之后重命名为：/etc/kubernetes/apiserver文件
+  ** 在k8s 1.8以后，node节点有一个专门的认证模式和RBAC同级叫做Node，同时应该在--admission-control中开启NodeRestriction
+  
+  (2)准备service文件
+  创建/lib/systemd/system/kube-apiserver.service,并启动服务，kube-apiserver.service的内容如下：
+  # kube-apiserver.service
+  [Unit]
+  Description=Kubernetes API Server
+  Documentation=https://github.com/GoogleCloudPlatform/kubernetes
+  After=network.target
+  
+  [Service]
+  EnvironmrntFile=-/etc/kubernetes/kube-common
+  EnvironmentFile=-/etc/kubernetes/apiserver
+  ExecStart=/usr/local/bin/kube-api-server \
+           $KUBE_LOGTOSTDERR \
+           $KUBE_LOG_LEVEL \
+           $KUBE_ETCD_SERVERS \
+           $KUBE_API_ADDRESS \
+           $KUBE_API_PORT \
+           $KUBE_ALLOW_PRIV \
+           $KUBE_SERVICE_ADDRESSES \
+           $KUBE_ADMISSION_CONTROL \
+           $KUBE_API_ARGS
+  Restart=on-failure
+  Type=notify
+  LimitNOFILE=65536
+  
+  [Install]
+  WantedBy=multi-user.target
+  
+  (3)准备token.csv文件
+  kubelet首次启动时向kube-apiserver发送TLS Bootstrapping请求，kubeapiserver严重kubelet请求中的token是否与它配置的token.csv一直，如果一直则自动为kubelet生成证书和密钥
+  aaa,${VPC_NAME},10235,"system:kubelet-bootstrap"
+  其中，第一段是一个uuid，可以通过命令生成
+  > head -c 16 /dev/urandom | od -An -t x | tr -d ' '
+  第二段是VPC名称，当配置好kubectl后，我们需要创建一个以VPC名称命名的权限绑定，后续添加 node的时候需要使用，第三个数字作为标记，可以任意写，可以重复。最后一个固定系统角色，不建议修改
+  
+  (4)启动kube-api-server
+  ` systemctl daemon-reload && systemctl start kube-apiserver.service
+  
+5.kube-controller-manager部署
+kube-controller-manager文件不需要替换内容，创建/etc/kubernetes/controller-manager文件如下：
+> # kube-controller-manager
+KUBE_CONTROLLER_MANAGER_ARGS="--service-cluster-ip-range=172.254.0.0/16 \
+--cluster-name=kubernetes \
+--cluster-cidr=172.1.0.0/16 \
+--address=127.0.0.1 \
+--allocate-node-cidrs=true \
+--cluster-signing-cert-file=/etc/kubernetes/ssl/ca.pem \
+--cluster-signing-key-file=/etc/kubernetes/ssl/ca-key.pem \
+--service-account-private-key-file=/etc/kubernetes/ssl/ca-key.pem \
+--root-ca-file=/etc/kubernetes/ssl/ca.pem \
+--leader-elect=true"
+
+生成/lib/systemd/system/kube-controller-manager.service
+> 启动服务 systemctl daemon-reload && systemctl start kube-controllr-manager.service
+
+6.kube-scheduler部署
+kube-scheduler文件不需要替换内容，创建/etc/kubernetes/scheduler文件如下：
+> KUBE_SCHEDULER_ARGS="--address=127.0.0.1 --leader-elect=true"
+生成文件:/lib/systemd/system/kube-scheduler.service
+> 启动服务：systemctl daemon-reload && systemctl start kube-scheduler.service
+
+7.配置kubectl
+对于Master主机上的kubectl可以直接使用8080非tls端口，配置如下：
+kubectl config set-cluster kubernetes --server=http://$HOST:$PORT
+kubectl config set-credentials kubectl
+kubectl config set-context kubernetes --cluster=kubernetes --user=kubectl --namespace=${namespace}
+kubectl config use-context kubernetes
+
+8.配置secret
+镜像仓库开启了鉴权，我们需要创建secret，其中指定访问registry的账户信息，这里我们给定了一个超级用户，能够下载任何镜像
+> kubectl create secret docker-registry ${secretName} --docker-server=ysf.site.com --docker-password='123456' --docker-email="xx@163.com" --namespace=${namespace}
+如果仅仅创建了secret，在部署的时候，需要显式地在yaml文件中指定secret名称，这样非常不方便，我们可以将secret配置到默认的名称为default的ServiceAccount之中，这样在部署的时候k8s会默认使用它。命令如下
+> kubectl patch sa default --namespace="${namespace}" -p '{"imagePullSecrets":[{"name":"default"}]}'
+** 以上一组命令需要对每一个namespace执行
+
+9.配置Role与RoleBinding
+
+10.配置DNS系统服务
+配置DNS服务可以用下面的yaml文件，其中包括几个部分
+- ServiceAccount
+- ConfigMap
+- Deployment
+- Service
+
+11.配置Dashboard
