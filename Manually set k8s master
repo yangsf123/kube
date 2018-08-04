@@ -1,0 +1,204 @@
+# k8s 集群 master 手工搭建
+
+
+## 机器 && docker 版本
+- Centos7.2 +/Oracle Linux 7.2+
+- Docker-ce-17.03.2
+
+版本信息：
+- Kubernetes v1.9.1
+- Etcd v3.1.10
+
+官方指定的addons镜像版本信息
+hub.yun.paic.com.cn/k8s/k8s-dns-kube-amd64:1.14.8
+hub.yun.paic.com.cn/k8s/k8s-dns-dnsmasq-nanny-amd64:1.14.8
+hub.yun.paic.com.cn/k8s/k8s-dns-sidecar-amd64:1.14.8
+hub.yun.paic.com.cn/k8s/kubernetes-dashboard-amd64:1.8.0
+
+ 以下以POC环境搭建过程为例子
+  K8S集群Master搭建
+   机器&Docker版本
+   1 二进制程序拷贝
+   2 证书生成
+      1.CA证书
+      2.生成Etcd证书
+      3.生成Kubernetes证书
+   3 etcd部署
+      1.准备etcd环境变量文件
+      2.配置etcd.service并启动
+      3.配置网络
+   4 kube-apiserver部署
+      1.准备环境变量文件
+      2.准备service文件
+      3.准备token.csv文件
+      4.启动kube-apiserver
+   5 kube-controller-manager部署
+   6 kube-scheduler部署
+   7 配置kubectl
+   8 配置secret
+   9 配置Role与RoleBinding
+   10 配置DNS系统服务
+   11 配置Dashboard
+   
+ 1.二进制程序拷贝
+ 将下列二进制文件都拷贝到/usr/local/bin目录下：
+  - etcd
+  - etcdctl
+  - kube-apiserver
+  - kube-controller-manager
+  - kube-scheduler
+  - kubectl
+  - cfssl
+  - cfssl-certinfo
+  - cfssljson
+ 同时授予执行权限
+  > chmod +x /usr/local/bin
+  
+ 2.证书生成
+ (1) CA证书
+ 对于每一套k8s集群，会有唯一的一套CA证书，其余组件的证书都通过CA证书签发
+ 生成CA证书，其中配置文件ca-csr.json使用默认内容，如下：
+ > # 文件名 ca-csr.json
+ `
+ {
+    "CN": "kubernetes",
+    "key": {
+      "algo": "rsa",
+      "size": 2048
+    },
+    "names": [
+    {
+      "C": "CN",
+      "ST": "BeiJing",
+      "L": "BeiJing",
+      "O": "k8s",
+      "OU": "System"
+    }
+    ]
+ }
+ `
+ > 进入ca-csr.json所在目录下执行下方命令
+  ` cfssl gencert -initca ca-csr.json | cfssljson -bare ca
+ 执行命令，生成两个文件: ca.pem;ca-key.pem
+ 将ca.pem,ca-key.pem拷贝到/etc/kubernetes/ssl目录下
+ 
+ (2) 生成Etcd证书
+  需要配置etcd签发证书的配置文件，etcd-crs.json内容如下，其中“$ETCD_IP_LIST”需要替换成部署etcd的服务器的真实IP。对于集群模式，需要写多行用逗号隔开
+  > # 文件名： etcd-csr.json
+  `
+  {
+    "CN": "etcd",
+    "hosts": [
+      "127.0.0.1",
+      "$ETCD_IP_LIST"
+    ],
+    "key": {
+      "algo": "rsa",
+      "size": 2048
+    },
+    "names": [
+      {
+        "C": "CN",
+        "ST": "BeiJing",
+        "L": "BeiJing",
+        "O": "k8s",
+        "OU": "System"
+      }
+    ]
+  }
+  `
+另外生成证书需要使用ca-config.json文件，内容如下：
+> # 文件名：ca-config.json
+`
+{
+  "signing":{
+    "default": {
+      "expiry": "8760h"
+    },
+    "profiles": {
+      "kubernetes": {
+        "usages": [
+          "signing",
+          "key encipherment",
+          "server auth",
+          "client auth"
+        ],
+        "expiry": "8760h"
+      }
+    }
+  }
+}
+`
+配置以后，执行下方命令生成etcd的证书和密钥
+> cfssl gencert -ca=ca.pem -ca-key=ca-key.pem -config=ca-config.json -profile=kubernetes etcd-csr.json | cfssljson -bare etcd
+执行后会生成：etcd.pem,etcd-key.pem，将其拷贝到/etc/etcd/ssl目录下
+  (3)生成Kubernetes证书
+  类似的，需要先配置kubernetes-csr.json文件，同时替换其中"$MASTER_IP"为kube-apiserver的VIP
+  > # 文件名 kubernetes-csr.json
+  `
+  {
+    "CN": "kubernetes",
+    "hosts": [
+      "127.0.0.1",
+      "$MASTER_VIP",
+      "172.254.0.1",
+      "kubernetes",
+      "kubernetes.default",
+      "kubernetes.default.svc",
+      "kubernetes.default.svc.cluster",
+      "kubernetes.default.svc.cluster.local"
+    ],
+    "key": {
+      "algo": "rsa",
+      "size": 2048
+    },
+    "names": [
+      {
+        "C": "CN",
+        "ST": "BeiJing",
+        "L": "BeiJing",
+        "O": k8s,
+        "OU": "System"
+      }
+    ]
+  }
+  `
+  > 配时候执行以下命令
+  ` cfssl gencert -ca=ca.pem -ca-key=ca-key.pem -config=ca-config.json -profile=kubernetes kubernetes-csr.json | cfssljson -bare kubernetes
+  将生成的kubernetes.pem,kubernetes-key.pem拷贝到/etc/kubernetes/ssl目录下
+  
+  至此，Master部分需要的证书文件都已经生成完毕。
+  
+ 3.etcd部署
+  (1)准备etcd环境变量文件
+  etcd-cluster.template文件，内容如下
+  # 文件名 etcd-cluster.template
+  ETCD_OPTIONS="--name=${HOST_NAME} \
+    --client-cert-auth=true \
+    --cert-file=/etc/etcd/ssl/etcd.pem \
+    --key-file=/etc/etcd/ssl/etcd-key.pem \
+    --peer-cert-file=/etc/etcd/ssl/etcd.pem \
+    --peer-key-file=/etc/etcd/ssl/etcd-key.pem \
+    --trusted-ca-file=/etc/kubernetes/ssl/ca.pem \
+    --peer-trusted-ca-file=/etc/kubernetes/ssl/ca.pem \
+    --initial-advertise-peerpurls=https://${HOST_IP}:2380 \
+    --listen-peer-urls=https://${HOST_IP}:2380 \
+    --listen-client-urls=https://${HOST_IP}:2379,https://127.0.0.1:2379 \
+    --advertise-client-urls=https://${HOST_IP}:2379 \
+    --initial-cluster-token=etcd-cluster-0 \
+    --initial-cluster=${CLUSTER_ENDPOINTS} \
+    --initial-cluster-state=new \
+    --data-dir=/var/lib/etcd"
+    
+  需要替换的参数有：
+  - ${HOST_NAME} 运行etcd服务的主机名
+  - ${HOST_IP} 运行etcd服务的主机IP
+  - ${CLUSTER_ENDPOINTS} 整个etcd集群中的主机信息以${主机名}=${主机IP}形式，类似下面
+  ` --initial-cluster=CNSZ047071=https://10.25.65.31:2380,CNSZ047072=https://10.25.65.32:2380,CNSZ047073=https://10.25.65.33:2380
+  替换后重命名为/etc/etcd/etcd文件
+  
+ (2)配置etcd.service并启动
+ 创建目录/var/lib/etcd
+ 创建/lib/systemd/system/etcd.service,该文件内容如下
+ > # 文件名: etcd.service
+  
