@@ -1,0 +1,25 @@
+# caas-service image
+
+在原来的镜像中添加以下工具:
+
+## 1.安装证书生成工具
+wget https://pkg.cfssl.org/R1.2/cfssl_linux-amd64
+chmod +x cfssl_linux-amd64
+mv cfssl_linux-amd64 /bin/cfssl
+
+wget https://pkg.cfssl.org/R1.2/cfssljson_linux-amd64
+chmod +x cfssljson_linux-amd64
+mv cfssljson_linux-amd64 /bin/cfssljson
+
+wget https://pkg.cfssl.org/R1.2/cfssl-certinfo_linux-amd64
+chmod +x cfssl-certinfo_linux-amd64
+mv cfssl-certinfo_linux-amd64 /bin/cfssl-certinfo
+
+## 2.创建签发客户端证书的文件
+> # CA证书文件 ca-csr.json 
+> # ETCD证书文件 etcd-csr.json
+> # ca-config.json
+> # kubernetes证书文件 kubernetes-csr.json
+` https://github.com/yangsf123/kube/blob/master/Manually%20set%20k8s%20master
+
+## 3.
