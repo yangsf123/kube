@@ -1,0 +1,93 @@
+# k8s集群Master自动化搭建
+ 通过json文件定义k8s集群的大部分常用参数，通过ansible,python脚本shell脚本将一套k8s集群和负载均衡等部分部署起来，并且添加好需要的基础角色，secret等资源。
+ 
+ 版本信息
+  · Kubernetes v1.9.1
+  · Etcd v3.1.10
+  
+  · k8s 集群Master自动化搭建
+    - 1.json参数定义
+    - 2.json参数说明
+        2.1 ca部分
+        2.2 lb部分
+        2.3 etcd部分
+        2.4 kubeMaster部分
+        2.5 addOns部分
+    - 3.配置文件优化
+    
+1.json参数定义
+
+2.json参数说明
+  2.1 ca部分
+  `
+    "ca": {
+      "masterVip": "10.25.62.92",
+      "etcdIps": [
+        "10.25.62.86",
+        "10.25.62.87",
+        "10.25.62.93"
+      ]
+    }
+  `
+  
+  2.2 lb部分
+  `
+    "lb": {
+      "type": "KEEPALIVED_HAPROXY",
+      "servers": [
+        {
+          "hostname": "xx"
+          "ip": "10.25.62.99",
+          "password": ""
+        },
+        {
+          "hostname": "aa",
+          "ip": "10.25.62.100",
+          "password": ""
+        }
+      ],
+      "configs": [
+        {
+          "name": "kube_master_8080",
+          "vip": "10.25.62.86",
+          "port": 8080,
+          "servers": [
+            {
+              "name": "master_01",
+              "ip": "10.25.62.86",
+              "port":8080
+            },
+          ]
+        },
+      ]
+    }
+  `
+  
+  2.3 etcd部分
+  etcd配置如下，主要也是用playbook替换，部署好etcd以后，需要写入flannel的网络胚子，我将flannel的配置也在json中定义
+  `
+    "etcd": {
+      "flannelNetworkConfig": {
+        "network": "172.1.0.0/16",
+        "subnet": 24,
+        "type": "vxlan"
+      },
+      "servers": [
+        {
+          "hostname": "xx",
+          "ip": "10.25.62.86",
+          "passwd": ""
+        },
+        {
+          "hostname": "aa",
+          "ip": "10.25.62.87",
+          "passwd": ""
+        },
+        {
+          "hostname": "qq",
+          "ip": "10.25.62.93",
+          "passwd": ""
+        }
+      ]
+    }
+  `
