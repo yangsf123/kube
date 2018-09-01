@@ -1,0 +1,234 @@
+# emptyDir
+apiVersion: v1
+kind: Pod
+metadata:
+    name: test-pd
+spec:
+    containers:
+    - image: gcr.io/google_containers/test-webserver
+      name: test-container
+      volumeMounts:
+      - mountPath: /cache
+        name: cache-volume
+    volumes:
+    - name: cache-volume
+      emptyDir: {}
+---
+
+# hostPath
+apiVersion: v1
+kind: Pod
+metadata:
+    name: test-pd
+spec:
+    containers:
+    - image: gcr.io/google_containers/test-webserver
+      name: test-container
+      volumeMounts:
+      - mountPath: /test-pd
+        name: test-volume
+    volumes:
+    - name: test-volume
+      hostPath:
+          path: /data
+---
+
+# NFS network file system
+volumes:
+- name: nfs
+  nfs:
+      # FIXME: use the right hostname
+      server: 10.254.234.223
+      path: "/"
+
+---
+
+# gcePersistentDisk
+volumes:
+    - name: test-volume
+      # This GCE PD must already exist.
+      gcePersistentDisk:
+          pdName: my-data-disk
+          fsType: ext4
+
+---
+
+# awsElasticBlockStore
+volumes:
+    - name: test-volume
+      # This AWS EBS volume must already exist.
+      awsElasticBlockStore:
+          volumeID: <volume-id>
+          fsType: ext4
+
+---
+
+# gitRepo
+volumes:
+    - name: git-volume
+      gitRepo:
+          repository: "git@somewhere:me/my-git-repository.git"
+          revision: "22f1d8406d464b0c0874075539c1f2e96c253775"
+
+---
+
+
+# subPath: 多个pod使用同一个Volume时，subPath非常有用
+apiVersion: v1
+kind: Pod
+metadata:
+    name: my-lamp-site
+spec:
+    containers:
+    - name: mysql
+      image: mysql
+      volumeMounts:
+          - mountPath: /var/lib/mysql
+            name: site-data
+            subPath: mysql
+    - name: php
+      image: php
+      volumeMounts:
+      - mountPath: /var/www/html
+        name: site-data
+        subPath: html
+    volumes:
+        - name: site-data
+          persistentVolumeClaim:
+              claimName: my-lamp-site-data
+
+---
+
+# FlexVolume
+- name: test
+  flexVolume:
+      driver: "kubernetes.io/lvm"
+      fsType: "ext4"
+      options:
+          volumeID: "vol1"
+          size: "1000m"
+          volumegroup: "kube_vg"
+
+---
+
+# Projected Volume
+apiVersion: v1
+kind: Pod
+metadata:
+    name: volume-test
+spec:
+    containers:
+    - name: container-test
+      image: busybox
+      volumeMounts:
+      - name: all-in-one
+        mountPath: "/projected-volume"
+        readOnly: true
+    volumes:
+    - name: all-in-one
+      projected:
+          sources:
+          - secret:
+              name: mysecret
+              items:
+                  - key: username
+                    path: my-group/my-username
+          - downwardAPI:
+              items:
+                  - path: "labels"
+                    fieldRef:
+                        fieldPath: metadata.labels
+                  - path: "cpu_limit"
+                    resourceFieldRef:
+                        containerName: container-test
+                        resource: limit.cpu
+          - configMap:
+              name: myconfigmap
+              items:
+                  - key: config
+                    path: my-group/my-config
+---
+
+# 本地存储限额
+# --feature-gates=LocalStorageCapacityIsolation=true
+apiVersion: v1
+kind: Pod
+metadata:
+    name: ls1
+spec:
+    restartPolicy: Never
+    containers:
+    - name: hello
+      image: busybox
+      command: ["df"]
+      resources:
+          storage.kubernetes.io/overlay: 64Mi
+---
+
+
+apiVersion: v1
+kind: Pod
+metadata:
+    name: ls1
+spec:
+    restartPolicy: Never
+    containers:
+    - name: hello
+      image: busybox
+      command: ["df"]
+      volumeMounts:
+      - name: data
+        mountPath: /data
+    volumes:
+    - name: data
+      emptyDir:
+          sizeLimit: 64Mi
+
+---
+
+# Windows Volume
+apiVersion: v1
+kind: Pod
+metadata:
+    name: hostpath-pod
+spec:
+    containers:
+        - name: hostpath-nano
+          image: microsoft/nanoserver:1709
+          stdin: true
+          tty: true
+          volumeMounts:
+          - name: blah
+            mountPath: "C:\\etc\\foo"
+            readOnly: true
+    nodeSelector:
+        beta.kubernetes.io/os: windows
+    volumes:
+    - name: blah
+      hostPath:
+          path: "C:\\AzureData"
+
+---
+
+apiVersion: v1
+kind: Pod
+metadata:
+    name: empty-dir-pod
+spec:
+    containers:
+    - image: microsoft/nanoserver:1709
+      name: empty-dir-nano
+      stdin: true
+      tty: true
+      volumeMounts:
+      - mountPath: /cache
+        name: cache-volume
+      - mountPath: C:/scratch
+        name: scratch-volume
+    volumes:
+    - name: cache-volume
+      emptyDir: {}
+    - name: scratch-volume
+      emptyDir: {}
+    nodeSelector:
+        beta.kubernetes.io/os: windows
